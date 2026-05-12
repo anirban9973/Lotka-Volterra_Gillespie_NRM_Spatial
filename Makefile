@@ -19,7 +19,7 @@ LDFLAGS  = -L$(HDF5_PREFIX)/lib \
            -lhdf5 -lmpi -lm
 
 TARGET = a.out
-SRC    = Levin_Segel_stochastic_model.cpp
+SRC    = Lotka_Volterra_stochastic_model.cpp
 HEADER = nrm_heap_header.h
 
 .PHONY: all clean

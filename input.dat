@@ -1,5 +1,5 @@
 # ============================================================
-# Input parameters for Levin-Segel stochastic model
+# Input parameters for Lotka-Volterra stochastic model
 # Lines starting with # are comments
 # ============================================================
 
@@ -12,20 +12,19 @@ T_length                 32768
 t_transient              1000.0
 
 # Reaction rates
-b                        0.5
-e                        0.5
-p1                       1.0
-p2                       0.0
-d1P                      0.0
-d2P                      0.0
-d1H                      0.0
-d2H                      0.5
+# Steady state: rhoP* = dH/ps,  rhoH* = (bP - dP - cP*rhoP*) / (ps + pf)
+bP                       5.0
+ps                       1.0
+pf                       0.0
+dH                       0.1
+dP                       0.5
+cP                       1.0
 
 # Diffusion prefactor and rates
-z                        2.0
-mu1P                     1.0
+z                        0.0
+mu1P                     0.0
 mu2P                     0.0
-nu1H                     26.0
+nu1H                     0.0
 nu2H                     0.0
 
 # Job configuration
