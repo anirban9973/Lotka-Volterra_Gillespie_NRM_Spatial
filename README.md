@@ -1,28 +1,38 @@
-# Levin-Segel Stochastic Model — Spatial Gillespie / NRM
+# Lotka-Volterra Stochastic Model — Spatial Gillespie / NRM
 
-Stochastic spatial simulation of the **Levin-Segel predator-prey model** on a 1D periodic lattice using the **Next Reaction Method (NRM)**. The goal is to compute time-integrated spatial density profiles for ensemble-averaged structure factor / power spectrum analysis at ω=0, k=0.
+Stochastic spatial simulation of the **Lotka-Volterra predator-prey model** on a 1D periodic lattice using the **Next Reaction Method (NRM)**. The goal is to compute time-integrated spatial density profiles for ensemble-averaged structure factor / power spectrum analysis at ω=0.
 
 ## Model
 
-Two species — prey (P) and predator (H) — interact on a lattice of L sites with periodic boundary conditions. Each site hosts 8 possible events:
+Two species — prey (P) and predator (H) — interact on a lattice of L sites with periodic boundary conditions. Each site hosts 10 possible events:
 
 | # | Event | Propensity |
 |---|-------|-----------|
-| 1 | Predator diffusion (normal) | `ν₁H · H` |
-| 2 | Predator diffusion (coupled) | `ν₂H · H(H-1)/V` |
-| 3 | Prey diffusion (normal) | `μ₁P · P` |
-| 4 | Prey diffusion (coupled) | `μ₂P · P·H/V` |
-| 5 | Prey birth (linear) | `b · P` |
-| 6 | Prey birth (nonlinear) | `e · P(P-1)/V` |
-| 7 | Predation | `p₁ · P·H/V` |
-| 8 | Predator death (competition) | `d₂H · H(H-1)/V` |
+| 1 | Predator diffusion (linear) | `ν₁H · H` |
+| 2 | Predator diffusion (nonlinear) | `ν₂H · H(H-1)/V` |
+| 3 | Prey diffusion (linear) | `μ₁P · P` |
+| 4 | Prey diffusion (nonlinear) | `μ₂P · P·H/V` |
+| 5 | Prey birth | `bP · P` |
+| 6 | Successful predation: P + H → 2H | `ps · P·H/V` |
+| 7 | Failed predation: P + H → H | `pf · P·H/V` |
+| 8 | Predator linear death | `dH · H` |
+| 9 | Prey linear death | `dP · P` |
+| 10 | Prey competition: 2P → P | `cP · P(P-1)/V` |
+
+The mean-field equations are:
+
+```
+dρP/dt = (bP - dP)·ρP - (ps + pf)·ρP·ρH - cP·ρP²
+dρH/dt =  ps·ρP·ρH - dH·ρH
+```
 
 Diffusion events move a particle to a randomly chosen nearest neighbour. The NRM uses a min-heap of per-site firing times for O(log L) event selection.
 
 Initial conditions are set to the mean-field steady state:
+
 ```
-ρP = b·d₂H / (p₁² - d₂H·e)
-ρH = b·p₁  / (p₁² - d₂H·e)
+ρP* = dH / ps
+ρH* = (bP - dP - cP·ρP*) / (ps + pf)
 ```
 
 ## Dependencies
@@ -65,21 +75,19 @@ T_length                 32768     # simulation length after transient (2^15)
 t_transient              1000.0    # burn-in time
 
 # Reaction rates
-b    0.5    # prey birth rate
-e    0.5    # nonlinear prey birth rate
-p1   1.0    # predation rate
-p2   0.0    # (unused)
-d1P  0.0    # (unused)
-d2P  0.0    # (unused)
-d1H  0.0    # (unused)
-d2H  0.5    # predator death rate (competition)
+bP   5.0    # prey birth rate
+ps   1.0    # successful predation rate (P + H -> 2H)
+pf   0.0    # failed predation rate    (P + H -> H)
+dH   0.1    # predator linear death rate
+dP   0.5    # prey linear death rate
+cP   1.0    # prey intraspecific competition rate
 
 # Diffusion (bare multipliers — scaled by z in code)
-z    2.0    # diffusion prefactor
-mu1P 1.0   # prey normal diffusion
-mu2P 0.0   # prey coupled diffusion
-nu1H 26.0  # predator normal diffusion
-nu2H 0.0   # predator coupled diffusion
+z    0.0    # diffusion prefactor (0 = no diffusion)
+mu1P 0.0   # prey linear diffusion
+mu2P 0.0   # prey nonlinear diffusion
+nu1H 0.0   # predator linear diffusion
+nu2H 0.0   # predator nonlinear diffusion
 
 # Job configuration (n_threads must match --cpus-per-task in job.sh)
 n_threads                24
@@ -106,30 +114,31 @@ The array job runs **20 jobs × 24 threads × 100 realizations = 48,000 configur
 
 ## Output
 
-Each thread writes one HDF5 file: `output_job<J>_thread<T>.h5`
+One HDF5 file per array job: `output_job<J>.h5`
 
 | Dataset | Shape | Description |
 |---------|-------|-------------|
-| `prey` | `(100, L)` | time-integrated prey density per realization |
-| `predator` | `(100, L)` | time-integrated predator density per realization |
-| `seeds` | `(100,)` | unique seed (global realization identifier) |
+| `prey` | `(2400, L)` | time-integrated prey density per realization |
+| `predator` | `(2400, L)` | time-integrated predator density per realization |
+| `seeds` | `(2400,)` | unique seed (global realization identifier) |
 
-Results are written **immediately after each realization** — partial results are preserved if the job is interrupted.
+Results are written **after all realizations in a job complete** — each thread writes its block of rows atomically via an OpenMP critical section.
 
 ## File Structure
 
 ```
 .
-├── Levin_Segel_stochastic_model.cpp   # main simulation (OOP + OpenMP)
-├── nrm_heap_header.h                  # NRM heap data structures
-├── input.dat                          # runtime parameters
-├── Makefile                           # build system (spack-aware)
-├── executable_prep.sh                 # local compile script
-├── job.sh                             # SLURM array job script
+├── Lotka_Volterra_stochastic_model.cpp    # main simulation (OOP + OpenMP)
+├── nrm_heap_header.h                      # NRM heap data structures
+├── input.dat                              # runtime parameters
+├── Makefile                               # build system (spack-aware)
+├── executable_prep.sh                     # local compile script
+├── job.sh                                 # SLURM array job script
 └── README.md
 ```
 
 ## References
 
-- Levin, S.A. & Segel, L.A. (1976). Hypothesis for origin of planktonic patchiness. *Nature*, 259, 659.
+- Lotka, A.J. (1925). *Elements of Physical Biology*. Williams & Wilkins.
+- Volterra, V. (1926). Fluctuations in the abundance of a species considered mathematically. *Nature*, 118, 558–560.
 - Gibson, M.A. & Bruck, J. (2000). Efficient exact stochastic simulation of chemical systems with many species and many channels. *J. Phys. Chem. A*, 104, 1876–1889.
