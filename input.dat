@@ -1,0 +1,34 @@
+# ============================================================
+# Input parameters for Levin-Segel stochastic model
+# Lines starting with # are comments
+# ============================================================
+
+# Lattice and volume
+L                        128
+V                        100.0
+
+# Temporal settings  (T_length = 2^15 = 32768)
+T_length                 32768
+t_transient              1000.0
+
+# Reaction rates
+b                        0.5
+e                        0.5
+p1                       1.0
+p2                       0.0
+d1P                      0.0
+d2P                      0.0
+d1H                      0.0
+d2H                      0.5
+
+# Diffusion prefactor and rates
+z                        2.0
+mu1P                     1.0
+mu2P                     0.0
+nu1H                     26.0
+nu2H                     0.0
+
+# Job configuration
+# n_threads must match --cpus-per-task in job.sh
+n_threads                24
+realizations_per_thread  100

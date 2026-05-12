@@ -1,0 +1,21 @@
+# Compiled binary
+a.out
+
+# Editor backup files
+*.cpp~
+*.sh~
+*~
+
+# Backup source
+Levin_Segel_stochastic_model_backup.cpp
+
+# Simulation output
+output_job*.h5
+config_error_*.dat
+final_integrated_config_*.dat
+config.dat
+
+# SLURM logs
+output_*.txt
+error_*.txt
+total_runtime_*.txt
