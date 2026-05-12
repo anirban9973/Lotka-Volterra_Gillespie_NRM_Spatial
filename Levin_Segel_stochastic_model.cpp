@@ -14,7 +14,6 @@
 #include <string>
 #include <map>
 #include <vector>
-#include <optional>
 #include <algorithm>
 #include <cstdlib>
 #include <numeric>
@@ -354,36 +353,24 @@ int main(int argc, char *argv[]) {
   int realizations_per_thread = params.realizations_per_thread;
   int realizations_per_job   = n_threads * realizations_per_thread;
 
-  // Initialize HDF5 library in single-threaded context before spawning threads.
-  // spack's HDF5 is built with MPI but without --enable-threadsafe, so concurrent
-  // HDF5 calls on different files still race on internal global state.
-  H5open();
+  size_t R_total = static_cast<size_t>(realizations_per_job);
+  size_t L       = static_cast<size_t>(params.L);
+
+  // One HDF5 file per array job, created before the parallel region (thread-safe)
+  std::string h5file = "output_job" + std::to_string(job_id) + ".h5";
+  HighFive::File file(h5file, HighFive::File::Truncate);
+  auto prey_dset = file.createDataSet<double>(      "prey",     HighFive::DataSpace({R_total, L}));
+  auto pred_dset = file.createDataSet<double>(      "predator", HighFive::DataSpace({R_total, L}));
+  auto seed_dset = file.createDataSet<unsigned int>("seeds",    HighFive::DataSpace({R_total}));
 
   #pragma omp parallel num_threads(n_threads)
   {
     int thread_id = omp_get_thread_num();
 
-    std::string h5file = "output_job" + std::to_string(job_id) +
-                         "_thread" + std::to_string(thread_id) + ".h5";
-
-    size_t R = static_cast<size_t>(realizations_per_thread);
-    size_t L = static_cast<size_t>(params.L);
-
-    // std::optional lets us construct HighFive::File inside a critical section
-    // while keeping it alive for the full duration of this thread's work.
-    std::optional<HighFive::File>    file_opt;
-    std::optional<HighFive::DataSet> prey_dset_opt, pred_dset_opt, seed_dset_opt;
-
-    #pragma omp critical (hdf5)
-    {
-      file_opt.emplace(h5file, HighFive::File::Truncate);
-      prey_dset_opt.emplace(file_opt->createDataSet<double>(
-        "prey",     HighFive::DataSpace({R, L})));
-      pred_dset_opt.emplace(file_opt->createDataSet<double>(
-        "predator", HighFive::DataSpace({R, L})));
-      seed_dset_opt.emplace(file_opt->createDataSet<unsigned int>(
-        "seeds",    HighFive::DataSpace({R})));
-    }
+    // Accumulate this thread's realizations in memory while running in parallel
+    std::vector<std::vector<double>> prey_buf(realizations_per_thread);
+    std::vector<std::vector<double>> pred_buf(realizations_per_thread);
+    std::vector<unsigned int>        seed_buf(realizations_per_thread);
 
     for (int local_idx = 0; local_idx < realizations_per_thread; local_idx++) {
 
@@ -391,20 +378,26 @@ int main(int argc, char *argv[]) {
         (job_id - 1) * realizations_per_job +
         thread_id    * realizations_per_thread + local_idx);
 
-      // Simulation runs fully in parallel — no critical section needed
       Simulation sim(params, seed);
       sim.initialize();
       sim.run();
       sim.finalize();
 
-      // Serialize only the HDF5 write (fast: ~1 KB per call)
-      size_t row = static_cast<size_t>(local_idx);
-      #pragma omp critical (hdf5)
-      {
-        prey_dset_opt->select({row, 0}, {1, L}).write(sim.prey_spectrum());
-        pred_dset_opt->select({row, 0}, {1, L}).write(sim.predator_spectrum());
-        seed_dset_opt->select({row},    {1}   ).write(std::vector<unsigned int>{seed});
-      }
+      prey_buf[local_idx] = sim.prey_spectrum();
+      pred_buf[local_idx] = sim.predator_spectrum();
+      seed_buf[local_idx] = seed;
+    }
+
+    // All 100 simulations done — dump the whole block in one critical section.
+    // Row range for this thread: [thread_id*R, (thread_id+1)*R)
+    size_t R      = static_cast<size_t>(realizations_per_thread);
+    size_t row_start = static_cast<size_t>(thread_id) * R;
+
+    #pragma omp critical (hdf5)
+    {
+      prey_dset.select({row_start, 0}, {R, L}).write(prey_buf);
+      pred_dset.select({row_start, 0}, {R, L}).write(pred_buf);
+      seed_dset.select({row_start},    {R}   ).write(seed_buf);
     }
 
   } // end parallel
