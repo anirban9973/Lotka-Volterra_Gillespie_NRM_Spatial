@@ -83,7 +83,7 @@ dP   0.5    # prey linear death rate
 cP   1.0    # prey intraspecific competition rate
 
 # Diffusion (bare multipliers — scaled by z in code)
-z    0.0    # diffusion prefactor (0 = no diffusion)
+z    2.0    # coordination number (fixed: 2 for 1D lattice)
 mu1P 0.0   # prey linear diffusion
 mu2P 0.0   # prey nonlinear diffusion
 nu1H 0.0   # predator linear diffusion

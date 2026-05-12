@@ -21,7 +21,7 @@ dP                       0.5
 cP                       1.0
 
 # Diffusion prefactor and rates
-z                        0.0
+z                        2.0
 mu1P                     0.0
 mu2P                     0.0
 nu1H                     0.0
