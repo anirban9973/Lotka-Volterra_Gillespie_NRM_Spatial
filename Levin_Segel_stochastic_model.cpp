@@ -14,6 +14,7 @@
 #include <string>
 #include <map>
 #include <vector>
+#include <optional>
 #include <algorithm>
 #include <cstdlib>
 #include <numeric>
@@ -353,25 +354,36 @@ int main(int argc, char *argv[]) {
   int realizations_per_thread = params.realizations_per_thread;
   int realizations_per_job   = n_threads * realizations_per_thread;
 
+  // Initialize HDF5 library in single-threaded context before spawning threads.
+  // spack's HDF5 is built with MPI but without --enable-threadsafe, so concurrent
+  // HDF5 calls on different files still race on internal global state.
+  H5open();
+
   #pragma omp parallel num_threads(n_threads)
   {
     int thread_id = omp_get_thread_num();
 
-    // Open HDF5 file and pre-allocate datasets at the correct final shape
     std::string h5file = "output_job" + std::to_string(job_id) +
                          "_thread" + std::to_string(thread_id) + ".h5";
-
-    HighFive::File file(h5file, HighFive::File::Truncate);
 
     size_t R = static_cast<size_t>(realizations_per_thread);
     size_t L = static_cast<size_t>(params.L);
 
-    auto prey_dset = file.createDataSet<double>(
-      "prey",     HighFive::DataSpace({R, L}));
-    auto pred_dset = file.createDataSet<double>(
-      "predator", HighFive::DataSpace({R, L}));
-    auto seed_dset = file.createDataSet<unsigned int>(
-      "seeds",    HighFive::DataSpace({R}));
+    // std::optional lets us construct HighFive::File inside a critical section
+    // while keeping it alive for the full duration of this thread's work.
+    std::optional<HighFive::File>    file_opt;
+    std::optional<HighFive::DataSet> prey_dset_opt, pred_dset_opt, seed_dset_opt;
+
+    #pragma omp critical (hdf5)
+    {
+      file_opt.emplace(h5file, HighFive::File::Truncate);
+      prey_dset_opt.emplace(file_opt->createDataSet<double>(
+        "prey",     HighFive::DataSpace({R, L})));
+      pred_dset_opt.emplace(file_opt->createDataSet<double>(
+        "predator", HighFive::DataSpace({R, L})));
+      seed_dset_opt.emplace(file_opt->createDataSet<unsigned int>(
+        "seeds",    HighFive::DataSpace({R})));
+    }
 
     for (int local_idx = 0; local_idx < realizations_per_thread; local_idx++) {
 
@@ -379,16 +391,20 @@ int main(int argc, char *argv[]) {
         (job_id - 1) * realizations_per_job +
         thread_id    * realizations_per_thread + local_idx);
 
+      // Simulation runs fully in parallel — no critical section needed
       Simulation sim(params, seed);
       sim.initialize();
       sim.run();
       sim.finalize();
 
-      // Write immediately — no accumulation in memory
+      // Serialize only the HDF5 write (fast: ~1 KB per call)
       size_t row = static_cast<size_t>(local_idx);
-      prey_dset.select({row, 0}, {1, L}).write(sim.prey_spectrum());
-      pred_dset.select({row, 0}, {1, L}).write(sim.predator_spectrum());
-      seed_dset.select({row},    {1}   ).write(std::vector<unsigned int>{seed});
+      #pragma omp critical (hdf5)
+      {
+        prey_dset_opt->select({row, 0}, {1, L}).write(sim.prey_spectrum());
+        pred_dset_opt->select({row, 0}, {1, L}).write(sim.predator_spectrum());
+        seed_dset_opt->select({row},    {1}   ).write(std::vector<unsigned int>{seed});
+      }
     }
 
   } // end parallel
