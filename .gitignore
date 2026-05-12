@@ -15,7 +15,5 @@ config_error_*.dat
 final_integrated_config_*.dat
 config.dat
 
-# SLURM logs
-output_*.txt
-error_*.txt
-total_runtime_*.txt
+# SLURM logs (kept in logs/ folder, not tracked)
+logs/
